@@ -15,3 +15,7 @@ Finally, just run the resulting binary with `out_dir`, `in_dir`.
 
 In any real-world scenario, you should use `taskset` to pin each client to an empty CPU core, the lib does not pick an empty core automatically (yet).
 
+
+### notes
+
+wrapped_cxx: CLANGXX_PATH.into(),

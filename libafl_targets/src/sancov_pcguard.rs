@@ -10,6 +10,7 @@ compile_error!(
     "the libafl_targets `sancov_pcguard_edges` and `sancov_pcguard_hitcounts` features are mutually exclusive."
 );
 
+
 /// Callback for sancov `pc_guard` - usually called by `llvm` on each block or edge.
 ///
 /// # Safety
@@ -75,4 +76,29 @@ pub unsafe extern "C" fn __sanitizer_cov_trace_pc_guard_init(mut start: *mut u32
             assert!((MAX_EDGES_NUM <= EDGES_MAP.len()), "The number of edges reported by SanitizerCoverage exceed the size of the edges map ({}). Use the LIBAFL_EDGES_MAP_SIZE env to increase it at compile time.", EDGES_MAP.len());
         }
     }
+}
+
+// DANIEL
+
+extern {
+    #[link_name = "llvm.returnaddress"]
+    fn return_address(a: i32) -> *const u8;
+}
+
+macro_rules! caller_address {
+    () => {
+        unsafe { return_address(0) }
+    };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sanitizer_cov_trace_pc() {
+    // println!("caller: {:p}", caller_address!());
+    //println!("I was called by {:X}", return_address());
+    // map size: 65536
+    let mut return_address: u32 = caller_address!() as u32;
+    let mut index: u32 = (return_address / 8) % 65536;
+    // asm!("mov {}, [rbp + 8]", out(reg) return_address);
+    // println!("index : {:x}", index);
+    __sanitizer_cov_trace_pc_guard(&mut index);
 }

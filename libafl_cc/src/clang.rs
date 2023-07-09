@@ -250,7 +250,8 @@ impl ToolWrapper for ClangWrapper {
 
         if self.optimize {
             new_args.push("-g".into());
-            new_args.push("-O3".into());
+            // new_args.push("-O3".into());
+            new_args.push("-O0".into());
             new_args.push("-funroll-loops".into());
         }
 
@@ -449,6 +450,8 @@ impl ToolWrapper for ClangWrapper {
             args.extend_from_slice(self.cc_args.as_slice());
         }
 
+        println!("DANIEL Args: {:?}", args);
+
         Ok(args)
     }
 
@@ -538,8 +541,10 @@ impl ClangWrapper {
 
         Self {
             optimize: true,
-            wrapped_cc: CLANG_PATH.into(),
-            wrapped_cxx: CLANGXX_PATH.into(),
+            // wrapped_cc: CLANG_PATH.into(),
+            // wrapped_cxx: CLANGXX_PATH.into(),
+            wrapped_cc: "/usr/local/bin/gcc-8".into(),
+            wrapped_cxx: "/usr/local/bin/g++-8".into(),
             name: String::new(),
             is_cpp: false,
             is_asm: false,

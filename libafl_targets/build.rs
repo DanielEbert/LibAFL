@@ -1,5 +1,6 @@
 //! build.rs for `libafl_targets`
 
+
 use std::{env, fs::File, io::Write, path::Path};
 
 #[allow(clippy::too_many_lines)]

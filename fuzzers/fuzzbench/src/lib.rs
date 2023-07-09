@@ -1,3 +1,5 @@
+#![feature(link_llvm_intrinsics)]
+
 //! A singlethreaded libfuzzer-like fuzzer that can auto-restart.
 use mimalloc::MiMalloc;
 #[global_allocator]
@@ -54,6 +56,18 @@ use libafl_targets::{
 };
 #[cfg(unix)]
 use nix::{self, unistd::dup};
+
+extern {
+    #[link_name = "llvm.returnaddress"]
+    fn return_address(a: i32) -> *const u8;
+}
+
+macro_rules! caller_address {
+    () => {
+        unsafe { return_address(0) }
+    };
+}
+
 
 /// The fuzzer main (as `no_mangle` C function)
 #[no_mangle]

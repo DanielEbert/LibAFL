@@ -1,6 +1,5 @@
 //! `libafl_targets` contains runtime code, injected in the target itself during compilation.
-//!
-//!
+
 #![no_std]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(clippy::all)]
@@ -59,6 +58,8 @@
         while_true
     )
 )]
+
+#![feature(link_llvm_intrinsics)]
 
 #[cfg(feature = "std")]
 #[macro_use]

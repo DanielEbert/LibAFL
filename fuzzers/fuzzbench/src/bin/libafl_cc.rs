@@ -17,12 +17,13 @@ pub fn main() {
         dir.pop();
 
         // Must be always present, even without --libafl
-        args.push("-fsanitize-coverage=trace-pc-guard,trace-cmp".into());
+        // TODODANIEL args.push("-fsanitize-coverage=trace-pc-guard,trace-cmp".into());
+        args.push("-fsanitize-coverage=trace-pc,trace-cmp".into());
 
         let mut cc = ClangWrapper::new();
 
-        #[cfg(any(target_os = "linux", target_vendor = "apple"))]
-        cc.add_pass(LLVMPasses::AutoTokens);
+        // #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+        // cc.add_pass(LLVMPasses::AutoTokens);
 
         if let Some(code) = cc
             .cpp(is_cpp)
@@ -33,7 +34,7 @@ pub fn main() {
             .parse_args(&args)
             .expect("Failed to parse the command line")
             .link_staticlib(&dir, "fuzzbench")
-            .add_pass(LLVMPasses::CmpLogRtn)
+            //.add_pass(LLVMPasses::CmpLogRtn)
             .run()
             .expect("Failed to run the wrapped compiler")
         {
