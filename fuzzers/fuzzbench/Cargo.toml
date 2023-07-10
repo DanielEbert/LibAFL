@@ -27,6 +27,7 @@ libafl_cc = { path = "../../libafl_cc/" }
 clap = { version = "4.0", features = ["default"] }
 nix = "0.26"
 mimalloc = { version = "*", default-features = false }
+libcasr = { version = "2.5", optional = true}
 
 [lib]
 name = "fuzzbench"

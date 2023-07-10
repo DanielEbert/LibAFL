@@ -29,8 +29,8 @@ use libafl::{
     corpus::{Corpus, InMemoryOnDiskCorpus, OnDiskCorpus},
     events::SimpleRestartingEventManager,
     executors::{inprocess::InProcessExecutor, ExitKind, TimeoutExecutor},
-    feedback_or,
-    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback},
+    feedback_and, feedback_or,
+    feedbacks::{CrashFeedback, MaxMapFeedback, NewHashFeedback, TimeFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
     monitors::SimpleMonitor,
@@ -38,7 +38,7 @@ use libafl::{
         scheduled::havoc_mutations, token_mutations::I2SRandReplace, tokens_mutations,
         StdMOptMutator, StdScheduledMutator, Tokens,
     },
-    observers::{HitcountsMapObserver, TimeObserver},
+    observers::{BacktraceObserver, HitcountsMapObserver, TimeObserver},
     schedulers::{
         powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler,
     },
@@ -57,7 +57,7 @@ use libafl_targets::{
 #[cfg(unix)]
 use nix::{self, unistd::dup};
 
-extern {
+extern "C" {
     #[link_name = "llvm.returnaddress"]
     fn return_address(a: i32) -> *const u8;
 }
@@ -67,7 +67,6 @@ macro_rules! caller_address {
         unsafe { return_address(0) }
     };
 }
-
 
 /// The fuzzer main (as `no_mangle` C function)
 #[no_mangle]
@@ -276,8 +275,15 @@ fn fuzz(
         TimeFeedback::with_observer(&time_observer)
     );
 
+    let mut bt = None;
+    let bt_observer = BacktraceObserver::new(
+        "BacktraceObserver",
+        &mut bt,
+        libafl::observers::HarnessType::InProcess,
+    );
+
     // A feedback to choose if an input is a solution or not
-    let mut objective = CrashFeedback::new();
+    let mut objective = feedback_and!(CrashFeedback::new(), NewHashFeedback::new(&bt_observer));
 
     // If not restarting, create a State from scratch
     let mut state = state.unwrap_or_else(|| {
@@ -344,7 +350,7 @@ fn fuzz(
     let mut executor = TimeoutExecutor::new(
         InProcessExecutor::new(
             &mut harness,
-            tuple_list!(edges_observer, time_observer),
+            tuple_list!(edges_observer, time_observer, bt_observer),
             &mut fuzzer,
             &mut state,
             &mut mgr,
