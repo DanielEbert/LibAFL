@@ -58,7 +58,6 @@
         while_true
     )
 )]
-
 #![feature(link_llvm_intrinsics)]
 
 #[cfg(feature = "std")]
