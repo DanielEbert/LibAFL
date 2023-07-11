@@ -15,6 +15,9 @@ EXT_FUNC(LLVMFuzzerCustomCrossOver, size_t,
 EXT_FUNC_IMPL(LLVMFuzzerTestOneInput, int, (uint8_t *Data, size_t Size), false) {
   return 0;
 }
+EXT_FUNC_IMPL(__sanitizer_cov_trace_cmpf, void, (float a, float b), false) {
+  ;
+}
 
 EXT_FUNC_IMPL(libafl_main, void, (void), false) {
 }
