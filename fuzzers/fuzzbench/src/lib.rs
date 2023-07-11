@@ -26,13 +26,15 @@ use libafl::{
         AsSlice,
     },
     corpus::{Corpus, InMemoryOnDiskCorpus, OnDiskCorpus},
-    events::SimpleRestartingEventManager,
+    //events::SimpleRestartingEventManager,
+    events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
     executors::{inprocess::InProcessExecutor, ExitKind, TimeoutExecutor},
-    feedback_and, feedback_or,
+    feedback_and,
+    feedback_or,
     feedbacks::{CrashFeedback, MaxMapFeedback, NewHashFeedback, TimeFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
-    monitors::SimpleMonitor,
+    monitors::{MultiMonitor, SimpleMonitor},
     mutators::{
         scheduled::havoc_mutations, token_mutations::I2SRandReplace, tokens_mutations,
         StdMOptMutator, StdScheduledMutator, Tokens,
@@ -215,31 +217,47 @@ fn fuzz(
     let file_null = File::open("/dev/null")?;
 
     // 'While the monitor are state, they are usually used in the broker - which is likely never restarted
-    let monitor = SimpleMonitor::new(|s| {
-        #[cfg(unix)]
-        writeln!(&mut stdout_cpy, "{s}").unwrap();
-        #[cfg(windows)]
-        println!("{s}");
-        writeln!(log.borrow_mut(), "{:?} {s}", current_time()).unwrap();
-    });
+    // let monitor = SimpleMonitor::new(|s| {
+    //     #[cfg(unix)]
+    //     writeln!(&mut stdout_cpy, "{s}").unwrap();
+    //     #[cfg(windows)]
+    //     println!("{s}");
+    //     writeln!(log.borrow_mut(), "{:?} {s}", current_time()).unwrap();
+    // });
+    let monitor = MultiMonitor::new(|s| println!("{s}"));
 
     // We need a shared map to store our state before a crash.
     // This way, we are able to continue fuzzing afterwards.
     let mut shmem_provider = StdShMemProvider::new()?;
 
-    let (state, mut mgr) = match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider)
-    {
-        // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
-        Ok(res) => res,
-        Err(err) => match err {
-            Error::ShuttingDown => {
-                return Ok(());
-            }
-            _ => {
-                panic!("Failed to setup the restarter: {err}");
-            }
-        },
-    };
+    // let (state, mut mgr) = match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider)
+    // {
+    //     // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
+    //     Ok(res) => res,
+    //     Err(err) => match err {
+    //         Error::ShuttingDown => {
+    //             return Ok(());
+    //         }
+    //         _ => {
+    //             panic!("Failed to setup the restarter: {err}");
+    //         }
+    //     },
+    // };
+
+    let broker_port = 1337;
+
+    let (state, mut restarting_mgr) =
+        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+            Ok(res) => res,
+            Err(err) => match err {
+                Error::ShuttingDown => {
+                    return Ok(());
+                }
+                _ => {
+                    panic!("Failed to setup the restarter: {err}");
+                }
+            },
+        };
 
     // Create an observation channel using the coverage map
     // We don't use the hitcounts (see the Cargo.toml, we use pcguard_edges)
@@ -341,7 +359,7 @@ fn fuzz(
             tuple_list!(edges_observer, time_observer, bt_observer),
             &mut fuzzer,
             &mut state,
-            &mut mgr,
+            &mut restarting_mgr,
         )?,
         timeout,
     );
@@ -353,7 +371,7 @@ fn fuzz(
             tuple_list!(cmplog_observer),
             &mut fuzzer,
             &mut state,
-            &mut mgr,
+            &mut restarting_mgr,
         )?,
         // Give it more time!
         timeout * 10,
@@ -381,7 +399,12 @@ fn fuzz(
     // In case the corpus is empty (on first run), reset
     if state.must_load_initial_inputs() {
         state
-            .load_initial_inputs(&mut fuzzer, &mut executor, &mut mgr, &[seed_dir.clone()])
+            .load_initial_inputs(
+                &mut fuzzer,
+                &mut executor,
+                &mut restarting_mgr,
+                &[seed_dir.clone()],
+            )
             .unwrap_or_else(|_| {
                 println!("Failed to load initial corpus at {:?}", &seed_dir);
                 process::exit(0);
@@ -399,7 +422,16 @@ fn fuzz(
     // reopen file to make sure we're at the end
     log.replace(OpenOptions::new().append(true).create(true).open(logfile)?);
 
-    fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)?;
+    let iters = 1_000_000;
+    fuzzer.fuzz_loop_for(
+        &mut stages,
+        &mut executor,
+        &mut state,
+        &mut restarting_mgr,
+        iters,
+    )?;
+
+    restarting_mgr.on_restart(&mut state)?;
 
     // Never reached
     Ok(())
