@@ -19,6 +19,7 @@ pub fn main() {
         // Must be always present, even without --libafl
         // TODODANIEL args.push("-fsanitize-coverage=trace-pc-guard,trace-cmp".into());
         args.push("-fsanitize-coverage=trace-pc,trace-cmp".into());
+        args.push("--libafl".into());
 
         let mut cc = ClangWrapper::new();
 
