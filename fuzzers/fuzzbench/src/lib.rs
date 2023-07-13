@@ -26,11 +26,9 @@ use libafl::{
         AsSlice,
     },
     corpus::{Corpus, InMemoryOnDiskCorpus, OnDiskCorpus},
-    //events::SimpleRestartingEventManager,
-    events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
+    events::{setup_restarting_mgr_std, EventConfig, EventRestarter, SimpleRestartingEventManager},
     executors::{inprocess::InProcessExecutor, ExitKind, TimeoutExecutor},
-    feedback_and,
-    feedback_or,
+    feedback_and, feedback_or,
     feedbacks::{CrashFeedback, MaxMapFeedback, NewHashFeedback, TimeFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
@@ -70,9 +68,9 @@ pub extern "C" fn libafl_main() {
         .author("AFLplusplus team")
         .about("LibAFL-based fuzzer for Fuzzbench")
         .arg(
-            Arg::new("out")
+            Arg::new("crashes")
                 .short('o')
-                .long("output")
+                .long("crashes_dir")
                 .help("The directory to place finds in ('corpus')"),
         )
         .arg(
@@ -131,21 +129,18 @@ pub extern "C" fn libafl_main() {
     }
 
     // For fuzzbench, crashes and finds are inside the same `corpus` directory, in the "queue" and "crashes" subdir.
-    let mut out_dir = PathBuf::from(
-        res.get_one::<String>("out")
-            .expect("The --output parameter is missing")
+    let crashes_dir = PathBuf::from(
+        res.get_one::<String>("crashes")
+            .expect("The --crashes_dir parameter is missing")
             .to_string(),
     );
-    if fs::create_dir(&out_dir).is_err() {
-        println!("Out dir at {:?} already exists.", &out_dir);
-        if !out_dir.is_dir() {
-            println!("Out dir at {:?} is not a valid directory!", &out_dir);
-            return;
-        }
+    if !crashes_dir.is_dir() {
+        println!(
+            "Crashes dir at {:?} is not a valid directory!",
+            &crashes_dir
+        );
+        return;
     }
-    let mut crashes = out_dir.clone();
-    crashes.push("crashes");
-    out_dir.push("queue");
 
     let in_dir = PathBuf::from(
         res.get_one::<String>("in")
@@ -169,8 +164,7 @@ pub extern "C" fn libafl_main() {
             .expect("Could not parse timeout in milliseconds"),
     );
 
-    fuzz(out_dir, crashes, &in_dir, tokens, &logfile, timeout)
-        .expect("An error occurred while fuzzing");
+    fuzz(crashes_dir, &in_dir, tokens, &logfile, timeout).expect("An error occurred while fuzzing");
 }
 
 fn run_testcases(filenames: &[&str]) {
@@ -199,8 +193,7 @@ fn run_testcases(filenames: &[&str]) {
 /// The actual fuzzer
 #[allow(clippy::too_many_lines)]
 fn fuzz(
-    corpus_dir: PathBuf,
-    objective_dir: PathBuf,
+    crashes_dir: PathBuf,
     seed_dir: &PathBuf,
     tokenfile: Option<PathBuf>,
     logfile: &PathBuf,
@@ -217,37 +210,22 @@ fn fuzz(
     let file_null = File::open("/dev/null")?;
 
     // 'While the monitor are state, they are usually used in the broker - which is likely never restarted
-    // let monitor = SimpleMonitor::new(|s| {
-    //     #[cfg(unix)]
-    //     writeln!(&mut stdout_cpy, "{s}").unwrap();
-    //     #[cfg(windows)]
-    //     println!("{s}");
-    //     writeln!(log.borrow_mut(), "{:?} {s}", current_time()).unwrap();
-    // });
-    let monitor = MultiMonitor::new(|s| println!("{s}"));
+    let monitor = SimpleMonitor::new(|s| {
+        #[cfg(unix)]
+        writeln!(&mut stdout_cpy, "{s}").unwrap();
+        #[cfg(windows)]
+        println!("{s}");
+        writeln!(log.borrow_mut(), "{:?} {s}", current_time()).unwrap();
+    });
+    // let monitor = MultiMonitor::new(|s| println!("{s}"));
 
     // We need a shared map to store our state before a crash.
     // This way, we are able to continue fuzzing afterwards.
     let mut shmem_provider = StdShMemProvider::new()?;
 
-    // let (state, mut mgr) = match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider)
-    // {
-    //     // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
-    //     Ok(res) => res,
-    //     Err(err) => match err {
-    //         Error::ShuttingDown => {
-    //             return Ok(());
-    //         }
-    //         _ => {
-    //             panic!("Failed to setup the restarter: {err}");
-    //         }
-    //     },
-    // };
-
-    let broker_port = 1337;
-
     let (state, mut restarting_mgr) =
-        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+        match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider) {
+            // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
             Ok(res) => res,
             Err(err) => match err {
                 Error::ShuttingDown => {
@@ -258,6 +236,21 @@ fn fuzz(
                 }
             },
         };
+
+    // let broker_port = 1337;
+
+    // let (state, mut restarting_mgr) =
+    //     match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+    //         Ok(res) => res,
+    //         Err(err) => match err {
+    //             Error::ShuttingDown => {
+    //                 return Ok(());
+    //             }
+    //             _ => {
+    //                 panic!("Failed to setup the restarter: {err}");
+    //             }
+    //         },
+    //     };
 
     // Create an observation channel using the coverage map
     // We don't use the hitcounts (see the Cargo.toml, we use pcguard_edges)
@@ -297,10 +290,10 @@ fn fuzz(
             // RNG
             StdRand::with_seed(current_nanos()),
             // Corpus that will be evolved, we keep it in memory for performance
-            InMemoryOnDiskCorpus::new(corpus_dir).unwrap(),
+            InMemoryOnDiskCorpus::new(seed_dir).unwrap(),
             // Corpus in which we store solutions (crashes in this example),
             // on disk so the user can get them after stopping the fuzzer
-            OnDiskCorpus::new(objective_dir).unwrap(),
+            OnDiskCorpus::new(crashes_dir).unwrap(),
             // States of the feedbacks.
             // The feedbacks can report the data that should persist in the State.
             &mut feedback,
