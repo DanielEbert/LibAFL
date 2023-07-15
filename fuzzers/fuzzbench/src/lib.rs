@@ -32,7 +32,7 @@ use libafl::{
     feedbacks::{CrashFeedback, MaxMapFeedback, NewHashFeedback, TimeFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
-    monitors::{MultiMonitor, SimpleMonitor},
+    monitors::{MultiMonitor, OnDiskTOMLMonitor, SimpleMonitor},
     mutators::{
         scheduled::havoc_mutations, token_mutations::I2SRandReplace, tokens_mutations,
         StdMOptMutator, StdScheduledMutator, Tokens,
@@ -201,46 +201,34 @@ fn fuzz(
 ) -> Result<(), Error> {
     let log = RefCell::new(OpenOptions::new().append(true).create(true).open(logfile)?);
 
-    #[cfg(unix)]
-    let mut stdout_cpy = unsafe {
-        let new_fd = dup(io::stdout().as_raw_fd())?;
-        File::from_raw_fd(new_fd)
-    };
+    // #[cfg(unix)]
+    // let mut stdout_cpy = unsafe {
+    //     let new_fd = dup(io::stdout().as_raw_fd())?;
+    //     File::from_raw_fd(new_fd)
+    // };
     #[cfg(unix)]
     let file_null = File::open("/dev/null")?;
 
     // 'While the monitor are state, they are usually used in the broker - which is likely never restarted
-    let monitor = SimpleMonitor::new(|s| {
+    /*let monitor = SimpleMonitor::new(|s| {
         #[cfg(unix)]
         writeln!(&mut stdout_cpy, "{s}").unwrap();
         #[cfg(windows)]
         println!("{s}");
         writeln!(log.borrow_mut(), "{:?} {s}", current_time()).unwrap();
-    });
-    // let monitor = MultiMonitor::new(|s| println!("{s}"));
+    });*/
+    let monitor = OnDiskTOMLMonitor::new(
+        "/tmp/fuzzer_stats.toml",
+        MultiMonitor::new(|s| println!("{s}")),
+    );
 
     // We need a shared map to store our state before a crash.
     // This way, we are able to continue fuzzing afterwards.
-    let mut shmem_provider = StdShMemProvider::new()?;
-
-    let (state, mut restarting_mgr) =
-        match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider) {
-            // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
-            Ok(res) => res,
-            Err(err) => match err {
-                Error::ShuttingDown => {
-                    return Ok(());
-                }
-                _ => {
-                    panic!("Failed to setup the restarter: {err}");
-                }
-            },
-        };
-
-    // let broker_port = 1337;
+    // let mut shmem_provider = StdShMemProvider::new()?;
 
     // let (state, mut restarting_mgr) =
-    //     match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+    //     match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider) {
+    //         // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
     //         Ok(res) => res,
     //         Err(err) => match err {
     //             Error::ShuttingDown => {
@@ -251,6 +239,21 @@ fn fuzz(
     //             }
     //         },
     //     };
+
+    let broker_port = 1337;
+
+    let (state, mut restarting_mgr) =
+        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+            Ok(res) => res,
+            Err(err) => match err {
+                Error::ShuttingDown => {
+                    return Ok(());
+                }
+                _ => {
+                    panic!("Failed to setup the restarter: {err}");
+                }
+            },
+        };
 
     // Create an observation channel using the coverage map
     // We don't use the hitcounts (see the Cargo.toml, we use pcguard_edges)

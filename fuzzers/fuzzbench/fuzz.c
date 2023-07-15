@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
-  volatile int a[4] = {};
+  /*volatile int a[4] = {};
   if (Size >= 3) {
     if (Data[0] == 'F') {
       if (Data[1] == 'U') {
@@ -16,13 +16,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
         }
       }
     }
-  }
+  }*/
   // if (Size > 100) return a[3];
-  // if (Size >= 8 && *(uint32_t *)Data == 0xaabbccdd) { abort(); }
-  FILE *f;
+  if (Size >= 8 && *(uint32_t *)Data == 0xaabbccdd) { abort(); }
+  /*FILE *f;
   f = fopen("/tmp/fuzz", "a");
   fprintf(f, "1");
-  fclose(f);
+  fclose(f);*/
   return 0;
 }
 
