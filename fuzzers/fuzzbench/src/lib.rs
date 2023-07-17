@@ -95,7 +95,7 @@ pub extern "C" fn libafl_main() {
         .arg(
             Arg::new("statsfile")
                 .short('s')
-                .long("stats")
+                .long("statsfile")
                 .help("Writes stats to this file in toml format.")
                 .default_value("fuzzerstats.toml"),
         )
