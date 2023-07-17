@@ -93,6 +93,13 @@ pub extern "C" fn libafl_main() {
                 .default_value("libafl.log"),
         )
         .arg(
+            Arg::new("statsfile")
+                .short('s')
+                .long("stats")
+                .help("Writes stats to this file in toml format.")
+                .default_value("fuzzerstats.toml"),
+        )
+        .arg(
             Arg::new("timeout")
                 .short('t')
                 .long("timeout")
@@ -155,6 +162,7 @@ pub extern "C" fn libafl_main() {
     let tokens = res.get_one::<String>("tokens").map(PathBuf::from);
 
     let logfile = PathBuf::from(res.get_one::<String>("logfile").unwrap().to_string());
+    let statsfile = PathBuf::from(res.get_one::<String>("statsfile").unwrap().to_string());
 
     let timeout = Duration::from_millis(
         res.get_one::<String>("timeout")
@@ -164,7 +172,7 @@ pub extern "C" fn libafl_main() {
             .expect("Could not parse timeout in milliseconds"),
     );
 
-    fuzz(crashes_dir, &in_dir, tokens, &logfile, timeout).expect("An error occurred while fuzzing");
+    fuzz(crashes_dir, &in_dir, tokens, &logfile, &statsfile, timeout).expect("An error occurred while fuzzing");
 }
 
 fn run_testcases(filenames: &[&str]) {
@@ -197,6 +205,7 @@ fn fuzz(
     seed_dir: &PathBuf,
     tokenfile: Option<PathBuf>,
     logfile: &PathBuf,
+    statsfile: &PathBuf,
     timeout: Duration,
 ) -> Result<(), Error> {
     let log = RefCell::new(OpenOptions::new().append(true).create(true).open(logfile)?);
@@ -218,7 +227,7 @@ fn fuzz(
         writeln!(log.borrow_mut(), "{:?} {s}", current_time()).unwrap();
     });*/
     let monitor = OnDiskTOMLMonitor::new(
-        "/tmp/fuzzer_stats.toml",
+        statsfile,
         MultiMonitor::new(|s| println!("{s}")),
     );
 
