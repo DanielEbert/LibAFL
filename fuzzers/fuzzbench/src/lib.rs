@@ -418,12 +418,12 @@ fn fuzz(
     }
 
     // Remove target ouput (logs still survive)
-    #[cfg(unix)]
-    {
-        let null_fd = file_null.as_raw_fd();
-        dup2(null_fd, io::stdout().as_raw_fd())?;
-        dup2(null_fd, io::stderr().as_raw_fd())?;
-    }
+    // TODO: uncomment again #[cfg(unix)]
+    // TODO: uncomment again {
+    // TODO: uncomment again     let null_fd = file_null.as_raw_fd();
+    // TODO: uncomment again     dup2(null_fd, io::stdout().as_raw_fd())?;
+    // TODO: uncomment again     dup2(null_fd, io::stderr().as_raw_fd())?;
+    // TODO: uncomment again }
     // reopen file to make sure we're at the end
     log.replace(OpenOptions::new().append(true).create(true).open(logfile)?);
 
