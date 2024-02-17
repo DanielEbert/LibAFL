@@ -13,9 +13,12 @@ use std::{
     io::{self, Read, Write},
     path::PathBuf,
     process,
+    time::Instant,
 };
 
 use clap::{Arg, Command};
+// TODO #[cfg(all(unix, feature = "std", feature = "fork"))]
+use libafl::bolts::os::{fork, ForkResult};
 use libafl::{
     bolts::{
         current_nanos, current_time,
@@ -38,6 +41,7 @@ use libafl::{
         StdMOptMutator, StdScheduledMutator, Tokens,
     },
     observers::{BacktraceObserver, HitcountsMapObserver, TimeObserver},
+    prelude::Rand,
     schedulers::{
         powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler,
     },
@@ -53,6 +57,7 @@ use libafl_targets::autotokens;
 use libafl_targets::{
     libfuzzer_initialize, libfuzzer_test_one_input, std_edges_map_observer, CmpLogObserver,
 };
+use libc::{prctl, rlimit, setrlimit, PR_SET_DUMPABLE, RLIMIT_CORE};
 #[cfg(unix)]
 use nix::{self, unistd::dup};
 
@@ -106,6 +111,15 @@ pub extern "C" fn libafl_main() {
                 .help("Timeout for each individual execution, in milliseconds")
                 .default_value("1200"),
         )
+        .arg(
+            // TODO: might need input byte size
+            // Can have arg to where input shall be stored.
+            Arg::new("findNonCrashingInput")
+                .short('f')
+                .long("findNonCrashingInput")
+                .help("Find a non crashing input by randomly generating inputs.")
+                .action(clap::ArgAction::SetTrue),
+        )
         .arg(Arg::new("remaining"))
         .try_get_matches()
     {
@@ -126,6 +140,68 @@ pub extern "C" fn libafl_main() {
         "Workdir: {:?}",
         env::current_dir().unwrap().to_string_lossy().to_string()
     );
+
+    disable_core_dumps();
+
+    if res.get_flag("findNonCrashingInput") {
+        println!("Starting find for non-crashing input.");
+
+        let args: Vec<String> = env::args().collect();
+
+        let startTime = Instant::now();
+
+        let mut found_non_crashing_input = false;
+        let mut generated_inputs_count = 0;
+        let mut rng = StdRand::with_seed(current_nanos());
+        // TODO: set size, right now in 8 bytes
+        const input_size: usize = 80;
+        let mut buffer: [u64; input_size / 8] = [0; input_size / 8];
+
+        while !found_non_crashing_input {
+            if libfuzzer_initialize(&args) == -1 {
+                println!("Warning: LLVMFuzzerInitialize failed with -1");
+            }
+
+            for i in 0..10 {
+                buffer[i] = rng.next();
+            }
+            generated_inputs_count += 1;
+
+            if generated_inputs_count % 51 == 50 {
+                let elapsed_time = startTime.elapsed();
+                println!(
+                    "[FindNonCrashingInput] Generated {} inputs. {} fork/s",
+                    generated_inputs_count,
+                    generated_inputs_count as f64 / elapsed_time.as_secs_f64()
+                );
+            }
+
+            match unsafe { fork() }.expect("Failed to fork.") {
+                ForkResult::Parent(child) => {
+                    // TODO wait for child, evaluate exit kind
+                    // TODO: add timeout, after X seconds kill child, log, and contine
+                    let child_exit_status = child.status();
+                    let exited_with_signal = libc::WIFSIGNALED(child_exit_status);
+                    if !exited_with_signal {
+                        println!("Found non-crashing input.");
+                        found_non_crashing_input = true;
+                        // TODO: write input to file.
+                    }
+                }
+                ForkResult::Child => unsafe {
+                    libfuzzer_test_one_input(std::slice::from_raw_parts(
+                        buffer.as_ptr() as *const u8,
+                        input_size,
+                    ));
+                    std::process::exit(0);
+                },
+            }
+        }
+
+        // TODO: store buffer to file
+
+        return;
+    }
 
     if let Some(filenames) = res.get_many::<String>("remaining") {
         let filenames: Vec<&str> = filenames.map(String::as_str).collect();
@@ -172,7 +248,19 @@ pub extern "C" fn libafl_main() {
             .expect("Could not parse timeout in milliseconds"),
     );
 
-    fuzz(crashes_dir, &in_dir, tokens, &logfile, &statsfile, timeout).expect("An error occurred while fuzzing");
+    fuzz(crashes_dir, &in_dir, tokens, &logfile, &statsfile, timeout)
+        .expect("An error occurred while fuzzing");
+}
+
+fn disable_core_dumps() {
+    unsafe {
+        if prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 {
+            let err = std::io::Error::last_os_error();
+            println!("Failed to disable core dumps: {}", err);
+            return;
+        }
+    }
+    println!("Core dumps disabled for this process.");
 }
 
 fn run_testcases(filenames: &[&str]) {

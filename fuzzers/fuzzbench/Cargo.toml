@@ -29,6 +29,9 @@ nix = "0.26"
 mimalloc = { version = "*", default-features = false }
 libcasr = { version = "2.5", optional = true}
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2" # For (*nix) libc
+
 [lib]
 name = "fuzzbench"
 crate-type = ["staticlib"]
